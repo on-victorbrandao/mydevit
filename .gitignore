@@ -1,0 +1,60 @@
+# contexto do agente (nunca versionar)
+**/antigravity/
+**/.agents/
+bytz/AGENTS.md
+**/GEMINI.md
+**/.antigravitycli/
+**/mcp_config.json
+
+# segredos e credenciais
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.p12
+service_account*.json
+google_sa*.json
+*credentials*.json
+ml_cookie*
+*.session
+*.session-journal
+
+# dados e logs
+data/
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# python
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# front / node
+node_modules/
+.wrangler/
+.dev.vars
+
+# sistema e editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+~$*
+*.tmp
