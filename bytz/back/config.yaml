@@ -1,0 +1,20 @@
+timezone: America/Sao_Paulo
+publicar: false            # chave geral. true so com aprovacao do dono
+modo_sombra_dias: 3
+agenda: {inicio: "07:00", ultimo_slot: "23:45", fim: "23:55", intervalo_min: 15}
+limites: {max_posts_dia: 20, max_buscas_dia: 30, max_posts_mesma_categoria_seguidos: 1}
+filtros: {nota_min: 4.5, vendas_min: 500, desconto_min_pct: 15, repetido_dias: 30}
+score: {corte_post: 65, corte_reserva: 50,
+        pesos: {desconto: 25, demanda: 20, reputacao: 15, afinidade: 15, tendencia: 10, ticket: 10, frescor: 5}}
+picos: [{de: "12:00", ate: "14:00", exige_score: 75}, {de: "18:00", ate: "22:00", exige_score: 75}]
+ia:
+  modelo: "${GEMINI_MODEL}"
+  teto_mensal_brl: 50
+  alerta_pct: 80
+  max_tokens_saida: 600
+  usar_template_ao_estourar: true
+  # preencher com a tabela vigente do Google AI Studio antes de ligar a IA
+  precos: {entrada_usd_1m: null, saida_usd_1m: null, cotacao_brl: null}
+captacao: {pausa_min_s: 3, pausa_max_s: 8, timeout_s: 20, retries: 2}
+alertas: {telegram_privado: true, email: false}
+doctor: {disco_min_gb: 1, cookie_max_dias: 7}

@@ -1,0 +1,10 @@
+# datas que puxam temas no scout. regra: data fixa (dia/mes) ou regra simples de calendario
+datas:
+  - {nome: Volta as aulas, inicio: "01-10", fim: "02-28", nichos: [home-office, acessorios moveis]}
+  - {nome: Verao e fitness, inicio: "12-01", fim: "03-15", nichos: [fitness]}
+  - {nome: Dia das Maes, regra: "segundo domingo de maio", antecedencia_dias: 20, nichos: [smart home, eletronicos]}
+  - {nome: Dia dos Namorados, data: "06-12", antecedencia_dias: 15, nichos: [eletronicos, acessorios moveis]}
+  - {nome: Dia dos Pais, regra: "segundo domingo de agosto", antecedencia_dias: 20, nichos: [setup, eletronicos]}
+  - {nome: Dia das Criancas, data: "10-12", antecedencia_dias: 15, nichos: [eletronicos]}
+  - {nome: Black Friday, regra: "ultima sexta de novembro", antecedencia_dias: 21, nichos: [todos]}
+  - {nome: Natal, data: "12-25", antecedencia_dias: 30, nichos: [todos]}

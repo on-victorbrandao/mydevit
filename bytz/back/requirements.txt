@@ -1,0 +1,22 @@
+# base
+requests>=2.32.3
+python-dotenv>=1.0.1
+PyYAML>=6.0.1
+pydantic>=2.7
+tzdata
+
+# captacao
+beautifulsoup4>=4.12
+
+# google sheets (mesmas versoes minimas do legado)
+gspread>=6.1.2
+google-auth>=2.29.0
+
+# ia e telegram
+google-genai>=1.0
+telethon>=1.36
+
+# desenvolvimento
+pytest>=8.0
+ruff>=0.5
+black>=24.4
