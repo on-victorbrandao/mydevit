@@ -9,12 +9,14 @@ score: {corte_post: 65, corte_reserva: 50,
 picos: [{de: "12:00", ate: "14:00", exige_score: 75}, {de: "18:00", ate: "22:00", exige_score: 75}]
 ia:
   modelo: "${GEMINI_MODEL}"
-  teto_mensal_brl: 50
-  alerta_pct: 80
+  teto_mensal_brl: 50.0
+  alerta_pct: 80.0
   max_tokens_saida: 600
   usar_template_ao_estourar: true
-  # preencher com a tabela vigente do Google AI Studio antes de ligar a IA
-  precos: {entrada_usd_1m: null, saida_usd_1m: null, cotacao_brl: null}
+  cotacao_usd_brl: null
+  modelos:
+    # tarifas explicitas por 1M de tokens (USD). preencher antes do go-live
+    gemini-2.5-flash: {entrada_usd_1m: null, saida_usd_1m: null}
 captacao: {pausa_min_s: 3, pausa_max_s: 8, timeout_s: 20, retries: 2}
 alertas: {telegram_privado: true, email: false}
 doctor: {disco_min_gb: 1, cookie_max_dias: 7}
