@@ -260,6 +260,7 @@ def run_doctor(
     for titulo, (sucesso, detalhe) in cheques_externos:
         if test_mode and sucesso:
             simbolo = "[SIMULADO / NAO VERIFICADO]"
+            integracoes_prontas = False
         elif sucesso:
             simbolo = "[OK]"
         else:

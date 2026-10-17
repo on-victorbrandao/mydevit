@@ -336,7 +336,7 @@ def test_doctor_resumo_e_diferenciacao_de_status():
                 os.environ,
                 {
                     "SHEET_ID": "fake_id",
-                    "GOOGLE_SERVICE_ACCOUNT_FILE": "fake.json",
+                    "GOOGLE_SERVICE_ACCOUNT_FILE": str(sa_teste),
                     "TELEGRAM_BOT_TOKEN": "123:fake",
                 },
             ),
@@ -348,28 +348,10 @@ def test_doctor_resumo_e_diferenciacao_de_status():
         assert res_sim["fundacao_saudavel"] is True
         assert res_sim["integracoes_prontas"] is False
         assert "[ADIADO POR DECISAO DO DONO] Orcamento IA:" in saida_sim
+        assert "[SIMULADO / NAO VERIFICADO] Google Sheets:" in saida_sim
         assert "[SIMULADO / NAO VERIFICADO] Telegram Bot:" in saida_sim
+        assert "validacao em modo simulado" in saida_sim
         assert "TODAS OPERACIONAIS" not in saida_sim
-
-        # valida tambem rotulo simulado de Google Sheets sem declarar TODAS OPERACIONAIS
-        buffer_sim_sheets = io.StringIO()
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "SHEET_ID": "fake_id",
-                    "GOOGLE_SERVICE_ACCOUNT_FILE": str(sa_teste),
-                    "TELEGRAM_BOT_TOKEN": "123:fake",
-                },
-            ),
-            redirect_stdout(buffer_sim_sheets),
-        ):
-            run_doctor(test_mode=True, custom_db_path=banco_teste, custom_cookie_path=cookie_teste)
-
-        saida_sim_sheets = buffer_sim_sheets.getvalue()
-        assert "[SIMULADO / NAO VERIFICADO] Google Sheets:" in saida_sim_sheets
-        assert "validacao em modo simulado" in saida_sim_sheets
-        assert "TODAS OPERACIONAIS" not in saida_sim_sheets
 
         # 3. confere funcao de orcamento de ia isoladamente
         ok_ia, msg_ia = checar_orcamento_ia_local()
