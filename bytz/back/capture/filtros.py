@@ -88,7 +88,7 @@ def passa_filtros(
         return False, "nota abaixo do minimo"
 
     vendas = item.get("vendas")
-    if vendas is None or int(vendas) < int(cfg.get("vendas_min", 500)):
+    if vendas is not None and int(vendas) < int(cfg.get("vendas_min", 500)):
         return False, "vendas abaixo do minimo"
 
     return True, "aprovado"

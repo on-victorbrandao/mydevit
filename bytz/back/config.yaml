@@ -17,6 +17,6 @@ ia:
   modelos:
     # tarifas explicitas por 1M de tokens (USD). preencher antes do go-live
     gemini-2.5-flash: {entrada_usd_1m: null, saida_usd_1m: null}
-captacao: {pausa_min_s: 3, pausa_max_s: 8, timeout_s: 20, retries: 2}
+captacao: {pausa_min_s: 3, pausa_max_s: 8, timeout_s: 20, retries: 2, headless: false}  # headless false abre o chrome visivel
 alertas: {telegram_privado: true, email: false}
 doctor: {disco_min_gb: 1, cookie_max_dias: 7}

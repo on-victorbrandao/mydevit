@@ -11,11 +11,14 @@ from core.logger import ensure_env_loaded
 
 
 def _rodar_capture(args: argparse.Namespace) -> int:
-    # executa o estagio de captacao para um termo especifico e imprime resumo
+    # executa o estagio de captacao para um termo especifico ou arquivo local e imprime resumo
     fixture_path = Path(args.salvar_fixture).resolve() if args.salvar_fixture else None
+    arquivo_path = Path(args.arquivo).resolve() if getattr(args, "arquivo", None) else None
     resultado = executar_captacao_termo(
         termo=args.termo,
         salvar_fixture_path=fixture_path,
+        arquivo_html_path=arquivo_path,
+        max_retries_override=args.retries,
     )
     print(f"Termo buscado: {resultado['termo']}")
     print(f"Cards encontrados: {resultado['total_cards']}")
@@ -43,6 +46,17 @@ def main(argv: list[str] | None = None) -> int:
 
     cap_parser = subparsers.add_parser("capture", help="Executa a captacao publica por termo.")
     cap_parser.add_argument("--termo", required=True, help="Termo de busca (ex.: 'fone bluetooth').")
+    cap_parser.add_argument(
+        "--arquivo",
+        default=None,
+        help="Caminho opcional de HTML local para rodar parser, filtros e SQLite sem rede.",
+    )
+    cap_parser.add_argument(
+        "--retries",
+        type=int,
+        default=None,
+        help="Tentativas extras so para falha de rede (padrao: config.yaml). Use 0 para tentativa unica.",
+    )
     cap_parser.add_argument(
         "--salvar-fixture",
         default=None,

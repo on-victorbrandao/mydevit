@@ -39,14 +39,14 @@ def parse_nota(texto: str | None) -> float | None:
     return valor if 0.0 <= valor <= 5.0 else None
 
 
-def parse_vendas(texto: str | None) -> int:
-    # converte volume de vendas como '+5 mil vendidos' ou '+500 vendidos' para inteiro
+def parse_vendas(texto: str | None) -> int | None:
+    # converte volume de vendas como '+5 mil vendidos' ou '+500 vendidos' para inteiro ou None se ausente
     if not texto:
-        return 0
+        return None
     limpo = str(texto).lower().strip()
     match = re.search(r"(\d+(?:[.,]\d+)?)\s*(mil)?", limpo)
     if not match:
-        return 0
+        return None
     numero_str = match.group(1).replace(",", ".")
     tem_mil = match.group(2) is not None
     if tem_mil:

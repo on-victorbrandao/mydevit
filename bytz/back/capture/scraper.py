@@ -1,16 +1,19 @@
-# captacao em paginas publicas do mercado livre e gravacao no sqlite
+# captacao no mercado livre pelo google chrome real com sessao de conta secundaria e gravacao no sqlite
+import json
 import os
 import random
 import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 from zoneinfo import ZoneInfo
 
-import requests
 import yaml
 from bs4 import BeautifulSoup
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 
 from capture import selectors
 from capture.filtros import carregar_config_filtros, carregar_vetos, filtrar_produtos
@@ -22,16 +25,100 @@ from core.logger import get_logger
 PASTA_BACK = Path(__file__).resolve().parent.parent
 TZ_SP = ZoneInfo("America/Sao_Paulo")
 
-USER_AGENT_PADRAO = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
-)
+DOMINIO_COOKIE = ".mercadolivre.com.br"
+URLS_COOKIE = ("https://www.mercadolivre.com.br", "https://lista.mercadolivre.com.br")
 
 
 class BloqueioCaptacaoError(RuntimeError):
     # erro lancado quando o mercado livre retorna 403, 429 ou desafio de captcha
     pass
+
+
+def parse_cookie_string(cookie: str) -> dict[str, str]:
+    # transforma string de cabecalho Cookie em dicionario mantendo o ultimo valor de chaves repetidas
+    jar: dict[str, str] = {}
+    for part in (cookie or "").split(";"):
+        key, _sep, val = part.strip().partition("=")
+        if key:
+            jar[key.strip()] = val
+    return jar
+
+
+def merge_cookie(old_cookie: str, set_cookie_headers: list[str]) -> tuple[str, str]:
+    # funde o cookie vigente com os Set-Cookie da resposta e devolve cookie atualizado e csrf
+    jar = parse_cookie_string(old_cookie)
+    for header in set_cookie_headers or []:
+        first = header.split(";")[0]
+        key, _sep, val = first.strip().partition("=")
+        if key:
+            jar[key.strip()] = val
+    cookie_atualizado = "; ".join(f"{k}={v}" for k, v in jar.items())
+    return cookie_atualizado, jar.get("_csrf", "")
+
+
+def obter_caminho_cookie_busca(custom_cookie_path: Path | None = None) -> Path:
+    # resolve o caminho do arquivo json de cookie da conta secundaria de busca
+    if custom_cookie_path is not None:
+        return Path(custom_cookie_path)
+    env_path = os.environ.get("ML_SEARCH_COOKIE_FILE", "").strip()
+    if env_path:
+        return Path(env_path)
+    return PASTA_BACK / "ml_cookies_busca.json"
+
+
+def carregar_cookie_busca(custom_cookie_path: Path | None = None) -> str:
+    # le e valida o campo cookie do arquivo ml_cookies_busca.json sem logar valores sensiveis
+    caminho = obter_caminho_cookie_busca(custom_cookie_path)
+    if not caminho.exists():
+        raise RuntimeError(
+            f"Arquivo de cookie de busca nao encontrado ({caminho.name}). "
+            "Salve o cookie da conta secundaria com: python back/scripts/salvar_cookie.py --busca"
+        )
+    try:
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"JSON invalido em {caminho.name}") from e
+
+    cookie_str = str(dados.get("cookie") or "").strip()
+    if not cookie_str:
+        raise RuntimeError(f"Campo 'cookie' vazio em {caminho.name}")
+    return cookie_str
+
+
+def salvar_cookie_busca_atomico(cookie_novo: str, custom_cookie_path: Path | None = None) -> None:
+    # grava o cookie atualizado e o timestamp no json de busca usando arquivo temporario e replace
+    caminho = obter_caminho_cookie_busca(custom_cookie_path)
+    agora_iso = datetime.now(TZ_SP).isoformat(timespec="seconds")
+    dados = {
+        "marketplace": "Mercado Livre",
+        "origem": "busca",
+        "atualizacao": agora_iso,
+        "cookie": cookie_novo,
+    }
+    temporario = caminho.with_suffix(caminho.suffix + ".tmp")
+    temporario.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporario, caminho)
+
+
+def cookies_para_navegador(cookie_str: str) -> list[dict]:
+    # converte a string k=v; ... no formato de cookies que o contexto do chrome aceita
+    cookies = []
+    for nome, valor in parse_cookie_string(cookie_str).items():
+        if nome.startswith("__Host-"):
+            # cookie __Host- nao aceita dominio, entao vai amarrado na url
+            cookies.append({"name": nome, "value": valor, "url": URLS_COOKIE[1] + "/"})
+        else:
+            cookies.append(
+                {"name": nome, "value": valor, "domain": DOMINIO_COOKIE, "path": "/", "secure": True}
+            )
+    return cookies
+
+
+def cookies_navegador_para_string(cookie_antigo: str, cookies_navegador: list[dict]) -> str:
+    # funde os cookies que o chrome terminou a sessao com o cookie antigo usando merge_cookie
+    pares = [f"{c['name']}={c['value']}" for c in cookies_navegador if c.get("name")]
+    cookie_novo, _csrf = merge_cookie(cookie_antigo, pares)
+    return cookie_novo
 
 
 def carregar_config_captacao(custom_config_path: Path | None = None) -> dict:
@@ -41,7 +128,7 @@ def carregar_config_captacao(custom_config_path: Path | None = None) -> dict:
         dados = yaml.safe_load(f) or {}
     return dados.get(
         "captacao",
-        {"pausa_min_s": 3, "pausa_max_s": 8, "timeout_s": 20, "retries": 2},
+        {"pausa_min_s": 3, "pausa_max_s": 8, "timeout_s": 20, "retries": 2, "headless": False},
     )
 
 
@@ -58,7 +145,9 @@ def _detectar_captcha_ou_bloqueio(status_code: int, url_final: str, html: str) -
         return f"HTTP {status_code}"
     url_lower = (url_final or "").lower()
     if any(p in url_lower for p in ("account-verification", "/gz/account-verification", "captcha", "/login")):
-        return f"redirecionamento de bloqueio ({url_final})"
+        # guarda so host e caminho para nao levar ids de rastreio para log e banco
+        partes = urlsplit(url_final or "")
+        return f"redirecionamento de bloqueio ({partes.netloc}{partes.path})"
     html_lower = (html or "").lower()
     if "g-recaptcha" in html_lower or "ui-empty-state--captcha" in html_lower:
         return "desafio de captcha detectado no html"
@@ -86,8 +175,10 @@ def buscar_html_termo(
     termo: str,
     cfg_captacao: dict | None = None,
     aplicar_pausa: bool = False,
+    max_retries_override: int | None = None,
+    custom_cookie_path: Path | None = None,
 ) -> str:
-    # faz um unico get publico por termo sem sessao logada e para imediatamente em 403/429/captcha
+    # abre a busca no chrome real com o cookie da conta secundaria, salva a sessao renovada e para em bloqueio
     cfg = cfg_captacao or carregar_config_captacao()
     logger = get_logger("capture")
 
@@ -95,44 +186,76 @@ def buscar_html_termo(
         pausa = random.uniform(float(cfg.get("pausa_min_s", 3)), float(cfg.get("pausa_max_s", 8)))
         time.sleep(pausa)
 
+    cookie_atual = carregar_cookie_busca(custom_cookie_path)
     url = montar_url_busca(termo)
-    user_agent = os.environ.get("USER_AGENT", USER_AGENT_PADRAO).strip() or USER_AGENT_PADRAO
-    headers = {
-        "User-Agent": user_agent,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-    }
-    timeout_s = float(cfg.get("timeout_s", 20))
-    max_retries = int(cfg.get("retries", 2))
+    max_retries = (
+        int(max_retries_override) if max_retries_override is not None else int(cfg.get("retries", 2))
+    )
 
     ultimo_erro = None
     for tentativa in range(max_retries + 1):
         try:
-            resp = requests.get(url, headers=headers, cookies={}, timeout=timeout_s)
-        except requests.RequestException as e:
-            ultimo_erro = f"{type(e).__name__}"
+            status, url_final, html, cookies_sessao = _abrir_busca_no_chrome(url, cookie_atual, cfg)
+        except PlaywrightError as e:
+            # falha de rede ou do navegador, nunca bloqueio, entao pode tentar de novo
+            ultimo_erro = type(e).__name__
             if tentativa < max_retries:
                 time.sleep(2 ** (tentativa + 1))
                 continue
-            raise RuntimeError(f"Falha de rede ao buscar '{termo}': {ultimo_erro}") from e
+            raise RuntimeError(f"Falha no navegador ao buscar '{termo}': {ultimo_erro}") from e
 
-        motivo_bloqueio = _detectar_captcha_ou_bloqueio(resp.status_code, resp.url, resp.text)
+        motivo_bloqueio = _detectar_captcha_ou_bloqueio(status or 0, url_final, html)
         if motivo_bloqueio:
             msg = f"Captacao interrompida para '{termo}': {motivo_bloqueio}. Parando sem contornar."
             logger.error(msg)
             send_alert(msg, nivel="critico", detalhes={"termo": termo, "motivo": motivo_bloqueio})
             raise BloqueioCaptacaoError(msg)
 
-        if resp.status_code >= 500 and tentativa < max_retries:
+        if status is not None and status >= 500 and tentativa < max_retries:
             time.sleep(2 ** (tentativa + 1))
             continue
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Status HTTP inesperado ({resp.status_code}) na busca de '{termo}'")
+        if status is not None and status != 200:
+            raise RuntimeError(f"Status HTTP inesperado ({status}) na busca de '{termo}'")
 
-        return resp.text
+        # so grava a sessao renovada quando a busca deu certo
+        if cookies_sessao:
+            cookie_novo = cookies_navegador_para_string(cookie_atual, cookies_sessao)
+            salvar_cookie_busca_atomico(cookie_novo, custom_cookie_path)
+
+        return html
 
     raise RuntimeError(f"Falha ao buscar '{termo}': {ultimo_erro}")
+
+
+def _abrir_busca_no_chrome(url: str, cookie_atual: str, cfg: dict) -> tuple[int | None, str, str, list[dict]]:
+    # abre o google chrome instalado, injeta os cookies, espera os cards e devolve status, url, html e cookies
+    timeout_ms = int(float(cfg.get("timeout_s", 20)) * 1000)
+    headless = bool(cfg.get("headless", False))
+    opcoes_contexto = {"locale": "pt-BR", "timezone_id": "America/Sao_Paulo"}
+    user_agent = os.environ.get("USER_AGENT", "").strip()
+    if user_agent:
+        opcoes_contexto["user_agent"] = user_agent
+
+    with sync_playwright() as pw:
+        navegador = pw.chromium.launch(channel="chrome", headless=headless)
+        try:
+            contexto = navegador.new_context(**opcoes_contexto)
+            contexto.add_cookies(cookies_para_navegador(cookie_atual))
+            pagina = contexto.new_page()
+            resposta = pagina.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            status = resposta.status if resposta else None
+            try:
+                pagina.wait_for_selector(selectors.CARD, timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                # sem cards no tempo limite, devolve o que carregou para a trava avaliar
+                pass
+            html = pagina.content()
+            url_final = pagina.url
+            cookies_sessao = contexto.cookies(list(URLS_COOKIE))
+        finally:
+            navegador.close()
+    return status, url_final, html, cookies_sessao
 
 
 def _buscar_ids_postados_recentes(conn, dias: int = 30) -> set[str]:
@@ -230,13 +353,25 @@ def executar_captacao_termo(
     custom_db_path: Path | None = None,
     salvar_fixture_path: Path | None = None,
     html_override: str | None = None,
+    arquivo_html_path: Path | None = None,
+    max_retries_override: int | None = None,
+    custom_cookie_path: Path | None = None,
 ) -> dict:
     # executa o fluxo completo de captacao de um termo ate a gravacao no sqlite
     inicio_iso = datetime.now(TZ_SP).isoformat(timespec="seconds")
     logger = get_logger("capture")
 
     try:
-        html = html_override if html_override is not None else buscar_html_termo(termo)
+        if html_override is not None:
+            html = html_override
+        elif arquivo_html_path is not None:
+            html = Path(arquivo_html_path).read_text(encoding="utf-8")
+        else:
+            html = buscar_html_termo(
+                termo,
+                max_retries_override=max_retries_override,
+                custom_cookie_path=custom_cookie_path,
+            )
     except Exception as e:
         gravar_captacao_sqlite(
             termo=termo,
