@@ -25,6 +25,18 @@ def carregar_config_filtros(custom_config_path: Path | None = None) -> dict:
     )
 
 
+def carregar_max_buscas_dia(custom_config_path: Path | None = None) -> int:
+    # carrega o teto diario max_buscas_dia da secao limites do config.yaml (padrao 30)
+    caminho = custom_config_path or (PASTA_BACK / "config.yaml")
+    if not caminho.exists():
+        return 30
+    with open(caminho, "r", encoding="utf-8") as f:
+        dados = yaml.safe_load(f) or {}
+    limites = dados.get("limites") or {}
+    valor = int(limites.get("max_buscas_dia", 30))
+    return valor if valor > 0 else 30
+
+
 def carregar_vetos(custom_vetos_path: Path | None = None) -> dict[str, list[str]]:
     # carrega termos e categorias vetados do config/vetos.yaml normalizados sem acento
     caminho = custom_vetos_path or (PASTA_BACK / "config" / "vetos.yaml")
@@ -36,6 +48,18 @@ def carregar_vetos(custom_vetos_path: Path | None = None) -> dict[str, list[str]
         "termos": [_sem_acento_minusculo(t) for t in dados.get("termos", []) if t],
         "categorias": [_sem_acento_minusculo(c) for c in dados.get("categorias", []) if c],
     }
+
+
+def termo_contem_veto(texto: str, vetos: dict[str, list[str]] | None = None) -> bool:
+    # verifica se um termo ou nicho de busca viola qualquer regra de vetos.yaml
+    regras_veto = vetos if vetos is not None else carregar_vetos()
+    norm = _sem_acento_minusculo(texto)
+    if not norm:
+        return True
+    for proibido in regras_veto.get("termos", []) + regras_veto.get("categorias", []):
+        if proibido and proibido in norm:
+            return True
+    return False
 
 
 def passa_filtros(

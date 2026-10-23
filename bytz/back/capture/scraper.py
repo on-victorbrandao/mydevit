@@ -4,7 +4,8 @@ import os
 import random
 import re
 import time
-from datetime import datetime, timedelta
+from collections.abc import Callable
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus, urlsplit
 from zoneinfo import ZoneInfo
@@ -16,7 +17,13 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 from capture import selectors
-from capture.filtros import carregar_config_filtros, carregar_vetos, filtrar_produtos
+from capture.filtros import (
+    carregar_config_filtros,
+    carregar_max_buscas_dia,
+    carregar_vetos,
+    filtrar_produtos,
+    termo_contem_veto,
+)
 from capture.parser import parse_html_busca
 from core.alerts import send_alert
 from core.db import get_connection, init_db
@@ -274,6 +281,9 @@ def gravar_captacao_sqlite(
     custom_db_path: Path | None = None,
     status_exec: str = "sucesso",
     erro_exec: str | None = None,
+    categoria_padrao: str | None = None,
+    tema_origem: str | None = None,
+    registrar_execucao: bool = True,
 ) -> dict:
     # grava historico de preco, insere produtos aprovados com INSERT OR IGNORE e registra execucao
     init_db(custom_db_path)
@@ -307,13 +317,13 @@ def gravar_captacao_sqlite(
                     INSERT OR IGNORE INTO produtos (
                         id_produto, marketplace, nome_produto, categoria, imagem_url,
                         url_original, valor_original, valor_atual, desconto_pct,
-                        nota, vendas, termo_origem, status, data_captura, data_atualizacao
-                    ) VALUES (?, 'Mercado Livre', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?);
+                        nota, vendas, termo_origem, tema_origem, status, data_captura, data_atualizacao
+                    ) VALUES (?, 'Mercado Livre', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?, ?);
                     """,
                     (
                         item["id_produto"],
                         item["nome_produto"],
-                        item.get("categoria"),
+                        item.get("categoria") or categoria_padrao,
                         item.get("imagem_url"),
                         item.get("url_limpa") or item["url_original"],
                         item.get("valor_original"),
@@ -322,6 +332,7 @@ def gravar_captacao_sqlite(
                         item.get("nota"),
                         item.get("vendas"),
                         termo,
+                        item.get("tema_origem") or tema_origem,
                         hoje_str,
                         agora_iso,
                     ),
@@ -331,13 +342,14 @@ def gravar_captacao_sqlite(
                 else:
                     ignorados += 1
 
-            conn.execute(
-                """
-                INSERT INTO execucoes (modulo, inicio, fim, status, itens, erro)
-                VALUES ('capture', ?, ?, ?, ?, ?);
-                """,
-                (inicio_iso, agora_iso, status_exec, inseridos, erro_exec),
-            )
+            if registrar_execucao:
+                conn.execute(
+                    """
+                    INSERT INTO execucoes (modulo, inicio, fim, status, itens, erro)
+                    VALUES ('capture', ?, ?, ?, ?, ?);
+                    """,
+                    (inicio_iso, agora_iso, status_exec, inseridos, erro_exec),
+                )
     finally:
         conn.close()
 
@@ -356,6 +368,10 @@ def executar_captacao_termo(
     arquivo_html_path: Path | None = None,
     max_retries_override: int | None = None,
     custom_cookie_path: Path | None = None,
+    categoria_padrao: str | None = None,
+    tema_origem: str | None = None,
+    registrar_execucao: bool = True,
+    aplicar_pausa: bool = False,
 ) -> dict:
     # executa o fluxo completo de captacao de um termo ate a gravacao no sqlite
     inicio_iso = datetime.now(TZ_SP).isoformat(timespec="seconds")
@@ -369,19 +385,22 @@ def executar_captacao_termo(
         else:
             html = buscar_html_termo(
                 termo,
+                aplicar_pausa=aplicar_pausa,
                 max_retries_override=max_retries_override,
                 custom_cookie_path=custom_cookie_path,
             )
     except Exception as e:
-        gravar_captacao_sqlite(
-            termo=termo,
-            cards_extraidos=[],
-            aprovados=[],
-            inicio_iso=inicio_iso,
-            custom_db_path=custom_db_path,
-            status_exec="bloqueado" if isinstance(e, BloqueioCaptacaoError) else "erro",
-            erro_exec=str(e),
-        )
+        if registrar_execucao:
+            gravar_captacao_sqlite(
+                termo=termo,
+                cards_extraidos=[],
+                aprovados=[],
+                inicio_iso=inicio_iso,
+                custom_db_path=custom_db_path,
+                status_exec="bloqueado" if isinstance(e, BloqueioCaptacaoError) else "erro",
+                erro_exec=str(e),
+                registrar_execucao=True,
+            )
         raise
 
     if salvar_fixture_path:
@@ -395,15 +414,17 @@ def executar_captacao_termo(
         msg_zero = f"0 cards encontrados para '{termo}' (seletores quebraram ou pagina vazia)"
         logger.warning(msg_zero)
         send_alert(msg_zero, nivel="warning", detalhes={"termo": termo})
-        gravar_captacao_sqlite(
-            termo=termo,
-            cards_extraidos=[],
-            aprovados=[],
-            inicio_iso=inicio_iso,
-            custom_db_path=custom_db_path,
-            status_exec="erro",
-            erro_exec="0 cards encontrados",
-        )
+        if registrar_execucao:
+            gravar_captacao_sqlite(
+                termo=termo,
+                cards_extraidos=[],
+                aprovados=[],
+                inicio_iso=inicio_iso,
+                custom_db_path=custom_db_path,
+                status_exec="erro",
+                erro_exec="0 cards encontrados",
+                registrar_execucao=True,
+            )
         return {
             "termo": termo,
             "total_cards": 0,
@@ -437,6 +458,9 @@ def executar_captacao_termo(
         inicio_iso=inicio_iso,
         custom_db_path=custom_db_path,
         status_exec="sucesso",
+        categoria_padrao=categoria_padrao,
+        tema_origem=tema_origem,
+        registrar_execucao=registrar_execucao,
     )
 
     logger.info(
@@ -450,4 +474,292 @@ def executar_captacao_termo(
         "inseridos": res_db["inseridos"],
         "ignorados": res_db["ignorados"],
         "aprovados": aprovados,
+    }
+
+
+def selecionar_buscas_elegiveis(
+    registros_buscas: list[dict],
+    max_buscas_dia: int = 30,
+    vetos: dict[str, list[str]] | None = None,
+    hoje_str: str | None = None,
+    pular_executadas_hoje: bool = True,
+) -> list[dict]:
+    # filtra buscas com status ativo, sem vetos e dentro do orcamento diario max_buscas_dia
+    regras_veto = vetos if vetos is not None else carregar_vetos()
+    limite_dia = max(1, int(max_buscas_dia))
+
+    executadas_hoje = 0
+    if pular_executadas_hoje and hoje_str:
+        for reg in registros_buscas:
+            ult = str(reg.get("ultima_execucao") or "")
+            if ult.startswith(hoje_str):
+                executadas_hoje += 1
+
+    cota_restante = (
+        max(0, limite_dia - executadas_hoje) if (pular_executadas_hoje and hoje_str) else limite_dia
+    )
+    if cota_restante == 0:
+        return []
+
+    candidatas: list[dict] = []
+    for reg in registros_buscas:
+        if int(reg.get("ativo", 0)) != 1:
+            continue
+        termo = str(reg.get("termo") or "").strip()
+        nicho = str(reg.get("nicho") or "").strip()
+        if not termo or termo_contem_veto(termo, regras_veto):
+            continue
+        if nicho and termo_contem_veto(nicho, regras_veto):
+            continue
+        if pular_executadas_hoje and hoje_str:
+            ult = str(reg.get("ultima_execucao") or "")
+            if ult.startswith(hoje_str):
+                continue
+        candidatas.append(dict(reg))
+
+    candidatas.sort(
+        key=lambda b: (
+            int(b.get("prioridade") or 5),
+            int(b.get("aprovados_total") or 0),
+            -int(b.get("id") or 0),
+        ),
+        reverse=True,
+    )
+    return candidatas[:cota_restante]
+
+
+def calcular_atualizacao_busca(
+    registro_busca: dict,
+    total_cards: int,
+    total_aprovados: int,
+    agora_iso: str,
+    data_ref: date | None = None,
+) -> dict:
+    # calcula novos contadores, ultima_execucao, falhas consecutivas e inativacao apos 3 falhas
+    execucoes_novo = int(registro_busca.get("execucoes") or 0) + 1
+    resultados_novo = int(registro_busca.get("resultados_total") or 0) + max(0, int(total_cards))
+    aprovados_novo = int(registro_busca.get("aprovados_total") or 0) + max(0, int(total_aprovados))
+
+    if int(total_aprovados) > 0:
+        sem_aprovado_novo = 0
+        ativo_novo = 1
+        inativo_ate_novo = None
+    else:
+        sem_aprovado_novo = int(registro_busca.get("execucoes_sem_aprovado") or 0) + 1
+        if sem_aprovado_novo >= 3:
+            ativo_novo = 0
+            ref_d = data_ref or datetime.fromisoformat(agora_iso).date()
+            inativo_ate_novo = (ref_d + timedelta(days=14)).strftime("%Y-%m-%d")
+        else:
+            ativo_novo = 1
+            inativo_ate_novo = None
+
+    return {
+        "execucoes": execucoes_novo,
+        "execucoes_sem_aprovado": sem_aprovado_novo,
+        "ultima_execucao": agora_iso,
+        "resultados_total": resultados_novo,
+        "aprovados_total": aprovados_novo,
+        "ativo": ativo_novo,
+        "inativo_ate": inativo_ate_novo,
+    }
+
+
+def _registrar_execucao_capture(
+    inicio_iso: str,
+    status_exec: str,
+    itens: int,
+    erro_exec: str | None = None,
+    custom_db_path: Path | None = None,
+) -> None:
+    # insere linha de auditoria da rodada de captacao na tabela execucoes
+    fim_iso = datetime.now(TZ_SP).isoformat(timespec="seconds")
+    conn = get_connection(custom_db_path)
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO execucoes (modulo, inicio, fim, status, itens, erro)
+                VALUES ('capture', ?, ?, ?, ?, ?);
+                """,
+                (inicio_iso, fim_iso, status_exec, int(itens), erro_exec),
+            )
+    finally:
+        conn.close()
+
+
+def run(
+    data_ref: date | None = None,
+    custom_db_path: Path | None = None,
+    custom_config_path: Path | None = None,
+    custom_vetos_path: Path | None = None,
+    custom_cookie_path: Path | None = None,
+    max_buscas_override: int | None = None,
+    pular_executadas_hoje: bool = True,
+    html_por_termo: dict[str, str] | Callable[[str], str] | None = None,
+    arquivo_html_path: Path | None = None,
+    max_retries_override: int | None = None,
+) -> dict:
+    # consome termos ativos da tabela buscas, executa a captacao, atualiza buscas e para no 1o bloqueio
+    init_db(custom_db_path)
+    agora_dt = datetime.now(TZ_SP)
+    inicio_iso = agora_dt.isoformat(timespec="seconds")
+    ref_date = data_ref or agora_dt.date()
+    hoje_str = ref_date.strftime("%Y-%m-%d")
+    logger = get_logger("capture")
+
+    max_buscas = (
+        int(max_buscas_override)
+        if max_buscas_override is not None
+        else carregar_max_buscas_dia(custom_config_path)
+    )
+    vetos = carregar_vetos(custom_vetos_path)
+
+    conn = get_connection(custom_db_path)
+    try:
+        rows_buscas = [dict(r) for r in conn.execute("SELECT * FROM buscas;").fetchall()]
+        rows_temas = conn.execute("SELECT id, tema FROM temas;").fetchall()
+        mapa_temas = {int(r["id"]): str(r["tema"]) for r in rows_temas if r["id"] is not None}
+
+        # desativa imediatamente qualquer busca ativa cujo termo ou nicho viole vetos.yaml
+        with conn:
+            for reg in rows_buscas:
+                if int(reg.get("ativo", 0)) == 1:
+                    t_str = str(reg.get("termo") or "")
+                    n_str = str(reg.get("nicho") or "")
+                    if termo_contem_veto(t_str, vetos) or (n_str and termo_contem_veto(n_str, vetos)):
+                        conn.execute("UPDATE buscas SET ativo = 0 WHERE id = ?;", (reg["id"],))
+                        reg["ativo"] = 0
+    finally:
+        conn.close()
+
+    elegiveis = selecionar_buscas_elegiveis(
+        registros_buscas=rows_buscas,
+        max_buscas_dia=max_buscas,
+        vetos=vetos,
+        hoje_str=hoje_str,
+        pular_executadas_hoje=pular_executadas_hoje,
+    )
+
+    total_cards_lote = 0
+    total_aprovados_lote = 0
+    total_inseridos_lote = 0
+    total_ignorados_lote = 0
+    aposentados_lote = 0
+    resultados_por_termo: list[dict] = []
+
+    for idx, busca in enumerate(elegiveis):
+        termo = str(busca["termo"])
+        busca_id = busca.get("id")
+        nicho = busca.get("nicho")
+        tema_orig = mapa_temas.get(int(busca["tema_id"])) if busca.get("tema_id") is not None else None
+
+        html_override: str | None = None
+        if callable(html_por_termo):
+            html_override = html_por_termo(termo)
+        elif isinstance(html_por_termo, dict) and termo in html_por_termo:
+            html_override = html_por_termo[termo]
+
+        usar_pausa = idx > 0 and html_override is None and arquivo_html_path is None
+
+        try:
+            res_termo = executar_captacao_termo(
+                termo=termo,
+                custom_db_path=custom_db_path,
+                html_override=html_override,
+                arquivo_html_path=arquivo_html_path,
+                max_retries_override=max_retries_override,
+                custom_cookie_path=custom_cookie_path,
+                categoria_padrao=nicho,
+                tema_origem=tema_orig,
+                registrar_execucao=False,
+                aplicar_pausa=usar_pausa,
+            )
+        except BloqueioCaptacaoError as e:
+            _registrar_execucao_capture(
+                inicio_iso=inicio_iso,
+                status_exec="bloqueado",
+                itens=total_inseridos_lote,
+                erro_exec=str(e),
+                custom_db_path=custom_db_path,
+            )
+            raise
+        except Exception as e:
+            _registrar_execucao_capture(
+                inicio_iso=inicio_iso,
+                status_exec="erro",
+                itens=total_inseridos_lote,
+                erro_exec=str(e),
+                custom_db_path=custom_db_path,
+            )
+            raise
+
+        agora_termo_iso = datetime.now(TZ_SP).isoformat(timespec="seconds")
+        atualizacao = calcular_atualizacao_busca(
+            registro_busca=busca,
+            total_cards=res_termo["total_cards"],
+            total_aprovados=res_termo["total_aprovados"],
+            agora_iso=agora_termo_iso,
+            data_ref=ref_date,
+        )
+        if atualizacao["ativo"] == 0 and int(busca.get("ativo", 1)) == 1:
+            aposentados_lote += 1
+
+        if busca_id is not None:
+            conn_upd = get_connection(custom_db_path)
+            try:
+                with conn_upd:
+                    conn_upd.execute(
+                        """
+                        UPDATE buscas
+                        SET execucoes = ?,
+                            execucoes_sem_aprovado = ?,
+                            ultima_execucao = ?,
+                            resultados_total = ?,
+                            aprovados_total = ?,
+                            ativo = ?,
+                            inativo_ate = ?
+                        WHERE id = ?;
+                        """,
+                        (
+                            atualizacao["execucoes"],
+                            atualizacao["execucoes_sem_aprovado"],
+                            atualizacao["ultima_execucao"],
+                            atualizacao["resultados_total"],
+                            atualizacao["aprovados_total"],
+                            atualizacao["ativo"],
+                            atualizacao["inativo_ate"],
+                            busca_id,
+                        ),
+                    )
+            finally:
+                conn_upd.close()
+
+        total_cards_lote += res_termo["total_cards"]
+        total_aprovados_lote += res_termo["total_aprovados"]
+        total_inseridos_lote += res_termo["inseridos"]
+        total_ignorados_lote += res_termo["ignorados"]
+        resultados_por_termo.append(res_termo)
+
+    _registrar_execucao_capture(
+        inicio_iso=inicio_iso,
+        status_exec="sucesso",
+        itens=total_inseridos_lote,
+        erro_exec=None,
+        custom_db_path=custom_db_path,
+    )
+
+    logger.info(
+        f"Rodada capture concluida: termos={len(elegiveis)}, "
+        f"inseridos={total_inseridos_lote}, aposentados={aposentados_lote}"
+    )
+
+    return {
+        "termos_executados": len(elegiveis),
+        "total_cards": total_cards_lote,
+        "total_aprovados": total_aprovados_lote,
+        "inseridos": total_inseridos_lote,
+        "ignorados": total_ignorados_lote,
+        "aposentados": aposentados_lote,
+        "resultados": resultados_por_termo,
     }
