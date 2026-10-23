@@ -1,0 +1,10 @@
+# comissao por categoria, em %. preencher com a tabela vigente do programa de afiliados do ML (null = desconhecido)
+padrao_pct: null
+categorias:
+  Eletronicos, Audio e Video: null
+  Informatica: null
+  Celulares e Telefones: null
+  Casa, Moveis e Decoracao: null
+  Esportes e Fitness: null
+# faixas de ticket usadas no score
+faixas_preco_brl: [50, 150, 400, 1000]
