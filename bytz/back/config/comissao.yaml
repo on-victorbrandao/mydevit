@@ -6,5 +6,11 @@ categorias:
   Celulares e Telefones: null
   Casa, Moveis e Decoracao: null
   Esportes e Fitness: null
+  eletronicos: null
+  setup: null
+  smart home: null
+  acessorios moveis: null
+  home-office: null
+  fitness: null
 # faixas de ticket usadas no score
 faixas_preco_brl: [50, 150, 400, 1000]

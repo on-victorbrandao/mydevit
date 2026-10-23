@@ -9,6 +9,7 @@ sys.path.insert(0, str(PASTA_BACK))
 from capture.scraper import executar_captacao_termo
 from capture.scraper import run as run_capture
 from core.logger import ensure_env_loaded
+from curator.score import run as run_curator
 from scout.temas import run as run_scout
 from strategist.termos import run as run_strategist
 
@@ -79,6 +80,35 @@ def _rodar_capture(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rodar_curator(args: argparse.Namespace) -> int:
+    # executa o estagio 4 (curador) pontuando produtos novo e aplicando cortes e juiz llm
+    res = run_curator(
+        usar_cache_ia=not getattr(args, "sem_cache", False),
+        reprocessar_hoje=getattr(args, "reprocessar_hoje", False),
+    )
+    print(
+        f"Produtos avaliados: {res['avaliados']} | Curados (>=65): {res['curados']} | "
+        f"Reservas (50-64 ou variedade): {res['reservas']} | Descartados: {res['descartados']} "
+        f"(suspeitos: {res['suspeitos']})"
+    )
+    print(
+        f"Historico gravado: {res['historico_gravado']} | Chamadas IA: {res['chamadas_ia']} | "
+        f"Cache hits: {res['cache_hits']} | Custo IA: R$ {res['custo_brl']:.4f} | "
+        f"Fallback: {res['usou_fallback']}"
+    )
+
+    curados = [x for x in res["ranking"] if x["status"] == "curado"][:5]
+    if curados:
+        print("\nTop curados para ativacao (ate 5):")
+        for idx, item in enumerate(curados, start=1):
+            print(
+                f"  {idx}. [{item['id_produto']}] score={item['score']:.2f} | "
+                f"afinidade={item['afinidade']:.1f} | R$ {float(item['valor_atual'] or 0):.2f} | "
+                f"termo='{item.get('termo_origem')}' | {item['nome_produto'][:55]}"
+            )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ensure_env_loaded()
     parser = argparse.ArgumentParser(description="Executa um estagio do pipeline BYTZ.")
@@ -117,6 +147,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Caminho opcional para salvar o HTML anonimizado dos cards como fixture.",
     )
 
+    cur_parser = subparsers.add_parser(
+        "curator", help="Executa o Curador (score 0-100, historico de preco e juiz LLM em lote)."
+    )
+    cur_parser.add_argument(
+        "--reprocessar-hoje",
+        action="store_true",
+        help="Reavalia tambem produtos que ja foram curados/reservados/descartados na data de hoje.",
+    )
+    cur_parser.add_argument(
+        "--sem-cache",
+        action="store_true",
+        help="Ignora o cache local do juiz LLM nesta execucao.",
+    )
+
     args = parser.parse_args(argv)
     if args.estagio == "scout":
         return _rodar_scout(args)
@@ -124,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         return _rodar_strategist(args)
     if args.estagio == "capture":
         return _rodar_capture(args)
+    if args.estagio == "curator":
+        return _rodar_curator(args)
     return 1
 
 
