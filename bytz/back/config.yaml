@@ -11,12 +11,20 @@ ia:
   modelo: "${GEMINI_MODEL}"
   teto_mensal_brl: 50.0
   alerta_pct: 80.0
-  max_tokens_saida: 600
+  max_tokens_saida: 1200
   usar_template_ao_estourar: true
-  cotacao_usd_brl: null
+  cotacao_usd_brl: 6.0
   modelos:
-    # tarifas explicitas por 1M de tokens (USD). preencher antes do go-live
-    gemini-2.5-flash: {entrada_usd_1m: null, saida_usd_1m: null}
+    # tarifas explicitas por 1M de tokens (USD) no Google AI Studio
+    gemini-3.5-flash: {entrada_usd_1m: 0.30, saida_usd_1m: 2.50}
+    gemini-3.5-flash-lite: {entrada_usd_1m: 0.10, saida_usd_1m: 0.40}
+    gemini-2.5-flash: {entrada_usd_1m: 0.30, saida_usd_1m: 2.50}
+    gemini-2.5-flash-lite: {entrada_usd_1m: 0.10, saida_usd_1m: 0.40}
+    gemini-2.0-flash: {entrada_usd_1m: 0.10, saida_usd_1m: 0.40}
+    gemini-3-flash-preview: {entrada_usd_1m: 0.30, saida_usd_1m: 2.50}
+    gemini-flash-latest: {entrada_usd_1m: 0.30, saida_usd_1m: 2.50}
+    gemini-flash-lite-latest: {entrada_usd_1m: 0.10, saida_usd_1m: 0.40}
+    gemini-2.5-pro: {entrada_usd_1m: 1.25, saida_usd_1m: 10.00}
 captacao: {pausa_min_s: 3, pausa_max_s: 8, timeout_s: 20, retries: 2, headless: false}  # headless false abre o chrome visivel
 alertas: {telegram_privado: true, email: false}
 doctor: {disco_min_gb: 1, cookie_max_dias: 7}
