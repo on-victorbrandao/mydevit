@@ -72,7 +72,6 @@ STOPWORDS_TEMA = {
     "dos",
     "para",
     "com",
-    "sem",
     "em",
     "no",
     "na",
@@ -134,10 +133,10 @@ def carregar_max_buscas_dia(custom_config_path: Path | None = None) -> int:
 
 
 def limpar_termo_busca(texto: str) -> str:
-    # normaliza um termo de busca sem pontuacao estranha e em minusculo
+    # normaliza um termo de busca preservando numeros e expressoes comerciais como sem fio
     limpo = sem_acento_minusculo(texto)
     limpo = re.sub(r"[^a-z0-9\s\-]", " ", limpo)
-    palavras = [p for p in limpo.split() if len(p) > 1 and p not in STOPWORDS_TEMA]
+    palavras = [p for p in limpo.split() if (len(p) > 1 or p.isdigit()) and p not in STOPWORDS_TEMA]
     resultado = " ".join(palavras[:6]).strip()
     return resultado
 
@@ -146,7 +145,7 @@ def gerar_termos_para_tema_deterministico(
     tema_dict: dict,
     vetos: dict[str, list[str]] | None = None,
 ) -> list[dict]:
-    # gera de 3 a 5 termos de busca validos para um tema usando templates do nicho e palavras do tema
+    # gera de 3 a 5 termos de busca validos priorizando templates comerciais do nicho
     regras_veto = vetos if vetos is not None else carregar_vetos()
     texto_tema = str(tema_dict.get("tema") or "")
     if contem_veto(texto_tema, regras_veto):
@@ -156,25 +155,12 @@ def gerar_termos_para_tema_deterministico(
     nota = float(tema_dict.get("nota_tendencia") or 7.0)
     prioridade_base = max(1, min(10, round(nota)))
     tema_id = tema_dict.get("id")
+    fonte = str(tema_dict.get("fonte") or "")
 
     candidatos_termo: list[dict] = []
     vistos: set[str] = set()
 
-    # extrai nucleo limpo do proprio tema como primeiro termo especifico
-    nucleo = limpar_termo_busca(texto_tema)
-    if len(nucleo) >= 4 and not contem_veto(nucleo, regras_veto):
-        vistos.add(nucleo)
-        candidatos_termo.append(
-            TermoGerado(
-                termo=nucleo,
-                nicho=nicho,
-                prioridade=prioridade_base,
-                tema_id=tema_id,
-                filtros={"ordenacao": "mais_vendidos"},
-            ).model_dump()
-        )
-
-    # complementa com os templates do nicho ate ter entre 3 e 5 termos
+    # 1. adiciona primeiro os termos comerciais de alta conversao do nicho com a prioridade do tema
     for tpl in TEMPLATES_TERMOS_POR_NICHO.get(nicho, TEMPLATES_TERMOS_POR_NICHO["eletronicos"]):
         termo_tpl = limpar_termo_busca(tpl["termo"])
         if not termo_tpl or termo_tpl in vistos or contem_veto(termo_tpl, regras_veto):
@@ -189,13 +175,32 @@ def gerar_termos_para_tema_deterministico(
             TermoGerado(
                 termo=termo_tpl,
                 nicho=nicho,
-                prioridade=max(1, prioridade_base - 1),
+                prioridade=prioridade_base,
                 tema_id=tema_id,
                 filtros=filtros,
             ).model_dump()
         )
         if len(candidatos_termo) >= 4:
             break
+
+    # 2. se o tema vier do calendario sazonal/base, divide em ' e ' para extrair sub-termos especificos
+    if not fonte.startswith(("web:", "firecrawl:")):
+        partes_tema = [p.strip() for p in re.split(r"\be\b|:", texto_tema, flags=re.IGNORECASE) if p.strip()]
+        for parte in partes_tema:
+            nucleo = limpar_termo_busca(parte)
+            if len(nucleo) >= 4 and nucleo not in vistos and not contem_veto(nucleo, regras_veto):
+                vistos.add(nucleo)
+                candidatos_termo.append(
+                    TermoGerado(
+                        termo=nucleo,
+                        nicho=nicho,
+                        prioridade=max(1, prioridade_base - 1),
+                        tema_id=tema_id,
+                        filtros={"ordenacao": "mais_vendidos"},
+                    ).model_dump()
+                )
+                if len(candidatos_termo) >= 5:
+                    break
 
     return candidatos_termo[:5]
 
