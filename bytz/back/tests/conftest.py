@@ -1,5 +1,12 @@
-# configuracao compartilhada dos testes: impede chamada real ao gemini mesmo se o .env real for carregado
+# configuracao compartilhada dos testes: garante path do back e isola chamadas externas
+import sys
+from pathlib import Path
+
 import pytest
+
+PASTA_BACK = Path(__file__).resolve().parent.parent
+if str(PASTA_BACK) not in sys.path:
+    sys.path.insert(0, str(PASTA_BACK))
 
 
 @pytest.fixture(autouse=True)
