@@ -6,6 +6,8 @@ from pathlib import Path
 PASTA_BACK = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PASTA_BACK))
 
+from activation.affiliate import executar_estagio_ativacao
+from activation.fallback_queue import importar_links_fila, verificar_e_acionar_plano_b
 from capture.scraper import executar_captacao_termo
 from capture.scraper import run as run_capture
 from core.logger import ensure_env_loaded
@@ -109,6 +111,43 @@ def _rodar_curator(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rodar_activation(args: argparse.Namespace) -> int:
+    # executa o estagio 5 (ativacao) gerando links de afiliado para produtos curados
+    if getattr(args, "importar_fila", None):
+        res_imp = importar_links_fila(args.importar_fila)
+        print(
+            f"Fila importada: {res_imp['importados']} links promovidos a link_pronto | "
+            f"{res_imp['invalidos']} invalidos | {res_imp['ignorados']} ignorados."
+        )
+        return 0
+
+    if getattr(args, "plano_b", False):
+        res_pb = verificar_e_acionar_plano_b(limite_minimo=9999)
+        print(
+            f"Plano B manual acionado: {res_pb.get('candidatos_exportados', 0)} candidatos exportados para {res_pb.get('arquivo')}."
+        )
+        return 0
+
+    res = executar_estagio_ativacao(
+        limite=args.limite,
+        modalidade=args.modalidade,
+        tag=args.tag,
+    )
+    print(
+        f"Processados: {res['processados']} | Sucessos: {res['sucessos']} | "
+        f"Falhas: {res['falhas']} | Modalidade: {res['modalidade']}"
+    )
+    if res.get("produtos"):
+        print("\nProdutos curados avaliados:")
+        for p in res["produtos"]:
+            link = p.get("url_afiliado") or "sem link"
+            print(f"  - [{p['id_produto']}] status={p.get('status')} | {link} | {p['nome_produto'][:50]}")
+    if res.get("erro"):
+        print(f"Erro na execucao: {res['erro']}")
+        return 1
+    return 0 if res["falhas"] == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ensure_env_loaded()
     parser = argparse.ArgumentParser(description="Executa um estagio do pipeline BYTZ.")
@@ -161,6 +200,37 @@ def main(argv: list[str] | None = None) -> int:
         help="Ignora o cache local do juiz LLM nesta execucao.",
     )
 
+    act_parser = subparsers.add_parser(
+        "activation", help="Executa a Ativacao (geracao de links de afiliado com merge_cookie e createLink)."
+    )
+    act_parser.add_argument(
+        "--modalidade",
+        choices=["lote", "individual"],
+        default="lote",
+        help="Modalidade de geracao: lote (padrao) ou individual.",
+    )
+    act_parser.add_argument(
+        "--limite",
+        type=int,
+        default=None,
+        help="Limite de produtos curados para processar nesta execucao.",
+    )
+    act_parser.add_argument(
+        "--tag",
+        default=None,
+        help="Tag de afiliado customizada opcional (padrao: AFFILIATE_TAG do .env).",
+    )
+    act_parser.add_argument(
+        "--plano-b",
+        action="store_true",
+        help="Aciona exportacao da fila de candidatos para preenchimento manual do Plano B.",
+    )
+    act_parser.add_argument(
+        "--importar-fila",
+        default=None,
+        help="Caminho do arquivo CSV para importar links preenchidos manualmente pelo dono.",
+    )
+
     args = parser.parse_args(argv)
     if args.estagio == "scout":
         return _rodar_scout(args)
@@ -170,6 +240,8 @@ def main(argv: list[str] | None = None) -> int:
         return _rodar_capture(args)
     if args.estagio == "curator":
         return _rodar_curator(args)
+    if args.estagio == "activation":
+        return _rodar_activation(args)
     return 1
 
 
