@@ -99,6 +99,39 @@ def test_extrair_links_resposta_posicional_e_falha_parcial():
     assert res["falhas"][0]["url_original"] == "https://www.mercadolivre.com.br/p/MLB2"
 
 
+def test_extrair_links_resposta_slug_canonico_diferente_mesmo_id_mlb():
+    # valida pareamento por id mlb quando o ml devolve slug canonico antigo em origin_url
+    url_enviada = "https://www.mercadolivre.com.br/carregador-portatil-225w-universal-motorola/p/MLB54026101"
+    url_retornada = (
+        "https://www.mercadolivre.com.br/carregador-portatil-universal-motorlola-20w/p/MLB54026101"
+    )
+    resposta = {
+        "status": 200,
+        "urls": [
+            {
+                "origin_url": url_retornada,
+                "short_url": "https://meli.la/2LcN2i7",
+            },
+            {
+                "origin_url": "https://www.mercadolivre.com.br/power-bank-10000mah/p/MLB58097097",
+                "short_url": "https://meli.la/2ixf4xz",
+            },
+        ],
+    }
+    solicitadas = [
+        url_enviada,
+        "https://www.mercadolivre.com.br/power-bank-10000mah/p/MLB58097097",
+    ]
+    res = extrair_links_resposta(resposta, solicitadas)
+    assert len(res["sucessos"]) == 2
+    assert len(res["falhas"]) == 0
+    assert res["mapa"][url_enviada] == "https://meli.la/2LcN2i7"
+    assert (
+        res["mapa"]["https://www.mercadolivre.com.br/power-bank-10000mah/p/MLB58097097"]
+        == "https://meli.la/2ixf4xz"
+    )
+
+
 def test_executar_requisicao_linkbuilder_bloqueio():
     # simula redirecionamento para tela de login caracterizando sessao expirada
     mock_resp = MagicMock()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime
@@ -79,6 +80,14 @@ def validar_url_produto(url: str) -> bool:
         return False
 
 
+def extrair_id_mlb_url(url: str) -> str | None:
+    # extrai o identificador MLB de uma url de produto ou catalogo para pareamento seguro
+    if not url or not isinstance(url, str):
+        return None
+    m = re.search(r"MLB-?(\d+)", url, flags=re.IGNORECASE)
+    return f"MLB{m.group(1)}" if m else None
+
+
 def montar_payload(urls: list[str], tag: str = "") -> dict:
     # monta o dicionario json esperado pelo endpoint createLink
     return {
@@ -105,6 +114,16 @@ def extrair_links_resposta(
     )
 
     if tem_url_explicita:
+        # indexa urls solicitadas por id MLB unico para suportar variacao de slug canonico em origin_url
+        contagem_id: dict[str, int] = {}
+        mapa_id_solicitada: dict[str, str] = {}
+        for u_sol in urls_solicitadas:
+            id_mlb = extrair_id_mlb_url(u_sol)
+            if id_mlb:
+                contagem_id[id_mlb] = contagem_id.get(id_mlb, 0) + 1
+                mapa_id_solicitada[id_mlb] = u_sol
+        ids_unicos = {k: v for k, v in mapa_id_solicitada.items() if contagem_id.get(k) == 1}
+
         for item in itens_resp:
             if not isinstance(item, dict):
                 continue
@@ -117,14 +136,23 @@ def extrair_links_resposta(
             )
             short = item.get("short_url") or item.get("shortUrl")
             item_status = item.get("status", 200)
+            criado = item.get("created", True) is not False
 
-            if orig and short and item_status == 200 and validar_link_afiliado_url(short):
-                mapa[orig] = short
-                sucessos.append({"url_original": orig, "url_afiliado": short})
-            elif orig:
+            url_chave = orig
+            if orig and orig not in urls_solicitadas:
+                id_orig = extrair_id_mlb_url(orig)
+                if id_orig and id_orig in ids_unicos:
+                    url_chave = ids_unicos[id_orig]
+
+            if url_chave and short and item_status == 200 and criado and validar_link_afiliado_url(short):
+                mapa[url_chave] = short
+                if orig:
+                    mapa[orig] = short
+                sucessos.append({"url_original": url_chave, "url_afiliado": short})
+            elif url_chave:
                 falhas.append(
                     {
-                        "url_original": orig,
+                        "url_original": url_chave,
                         "motivo": item.get("error") or item.get("message") or f"status {item_status}",
                     }
                 )

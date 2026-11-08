@@ -694,7 +694,9 @@ def run(
             )
             raise
 
-        agora_termo_iso = datetime.now(TZ_SP).isoformat(timespec="seconds")
+        agora_termo_iso = datetime.combine(ref_date, datetime.now(TZ_SP).timetz()).isoformat(
+            timespec="seconds"
+        )
         atualizacao = calcular_atualizacao_busca(
             registro_busca=busca,
             total_cards=res_termo["total_cards"],
