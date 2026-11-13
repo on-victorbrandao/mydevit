@@ -1,0 +1,20 @@
+# Configuracao preparada; nenhum recurso foi criado ou publicado.
+name = "bytz-search-oauth"
+main = "worker.mjs"
+compatibility_date = "2026-11-09"
+workers_dev = true
+preview_urls = false
+
+[vars]
+# Preencher somente com a URL real obtida na etapa externa autorizada.
+REDIRECT_URI = ""
+
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+[observability.traces]
+enabled = false

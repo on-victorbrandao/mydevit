@@ -20,6 +20,8 @@ google_sa*.json
 ml_cookie*
 *.session
 *.session-journal
+# estado e tokens OAuth da busca, inclusive copias cifradas fora de secrets/
+*.dpapi
 
 # dados e logs
 data/
